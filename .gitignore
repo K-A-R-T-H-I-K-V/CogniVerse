@@ -1,0 +1,6 @@
+# In .gitignore
+cognitext-env/
+__pycache__/
+.env
+vector_store_text/
+images/
