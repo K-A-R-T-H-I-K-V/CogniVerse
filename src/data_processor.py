@@ -5,6 +5,8 @@ import fitz  # This is PyMuPDF
 from pathlib import Path
 from tqdm import tqdm
 import pickle
+import base64
+import uuid
 from unstructured.partition.pdf import partition_pdf
 
 # --- 1. CONFIGURATION ---
@@ -48,9 +50,11 @@ def process_pdf_and_extract_elements(pdf_path, output_dir):
         
         # This tells it to extract images.
         extract_images_in_pdf=True,
-        
+        # This tells unstructured to embed the image data directly into the element object
+        # instead of saving it as a side-effect.
+        extract_image_block_to_payload=True,
         # And this is where it will save the extracted image files.
-        image_output_dir_path=str(image_output_dir),
+        # image_output_dir_path=str(image_output_dir),
     )
 
     # --- 3. CATEGORIZE THE EXTRACTED ELEMENTS ---
@@ -68,7 +72,7 @@ def process_pdf_and_extract_elements(pdf_path, output_dir):
     
     print("Categorizing extracted elements...")
     # tqdm gives us a nice progress bar, which is helpful for long processes.
-    for element in tqdm(raw_pdf_elements, desc="Categorizing Elements"):
+    for element in tqdm(raw_pdf_elements, desc="Processing Elements"):
         element_type = str(type(element))
         # We check the type of each element to see if it's a table.
         if 'unstructured.documents.elements.Table' in element_type:
@@ -92,6 +96,18 @@ def process_pdf_and_extract_elements(pdf_path, output_dir):
         # Image, Header, Footer, etc.), this loop will simply ignore it and move on.
         # This is the correct, robust behavior.
         # Images are automatically saved to the folder, so we don't need to handle them here.
+        elif 'unstructured.documents.elements.Image' in element_type:
+            # The image data is now in the element's metadata payload.
+            image_data = element.metadata.image_base64
+            image_format = element.metadata.image_mime_type.split('/')[-1] # e.g., 'jpeg'
+            
+            # Create a unique filename for the image.
+            image_filename = f"page_{element.metadata.page_number}_img_{uuid.uuid4()}.{image_format}"
+            image_path = image_output_dir / image_filename
+            
+            # Decode the base64 string back into binary data and save the image.
+            with open(image_path, "wb") as img_file:
+                img_file.write(base64.b64decode(image_data))
 
     print(f"Found {len(texts)} text elements and {len(tables)} table elements.")
     return texts, tables

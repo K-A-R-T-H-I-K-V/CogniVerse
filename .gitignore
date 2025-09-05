@@ -12,3 +12,4 @@ __pycache__/
 # Generated data and vector stores
 figures/
 processed_data/
+vector_store_chroma/

@@ -17,7 +17,7 @@ from langchain_core.runnables import RunnablePassthrough # A utility to pass inp
 # These are the specific tools we've chosen for each step of our advanced pipeline.
 from langchain.storage import InMemoryStore # A simple, dictionary-like key-value store that lives in RAM.
 from langchain.retrievers.multi_vector import MultiVectorRetriever # The state-of-the-art retriever for multimodal RAG.
-from langchain_community.vectorstores import Chroma # Our chosen persistent vector store.
+from langchain_chroma import Chroma # Our chosen persistent vector store.
 from langchain_huggingface import HuggingFaceEmbeddings # The modern way to use Hugging Face embedding models.
 from langchain_ollama import OllamaLLM # The modern way to interface with local Ollama LLMs.
 from langchain_cohere import CohereRerank # The powerful re-ranking model.
@@ -156,45 +156,70 @@ def main():
     # If it does, we can skip this entire slow summarization and embedding process.
     if not vectorstore.get()['ids']:
         print("Vector store is empty. Populating with summaries and linking to original data...")
-        # In the NEW main() function...
-        print("Generating summaries for text, tables, and images. This may take a while...")
+        
+        # Define a cache file to save our progress
+        summary_cache_file = PROCESSED_DATA_DIR / "summaries.pkl"
+        
+        # Check if we have already made some progress
+        if summary_cache_file.exists():
+            with open(summary_cache_file, "rb") as f:
+                cached_summaries = pickle.load(f)
+            print(f"Loaded {len(cached_summaries['texts'])} cached text summaries and {len(cached_summaries['tables'])} table summaries.")
+        else:
+            cached_summaries = {"texts": [], "tables": [], "images": []}
 
-        # --- IMPROVED AND GENERALIZED PROMPTS ---
-        # The prompts are now purpose-driven, not subject-driven.
-        # We are telling the LLM *why* we need the summary: for a search index.
-        # This guides it to focus on keywords, key concepts, and factual content.
-        text_prompt = "Provide a concise, one-sentence summary of the following text that captures its main keywords and concepts. This summary will be used for a search index. Element: {element}"
-        table_prompt = "Provide a concise, one-sentence summary of the following table content that captures its main keywords and concepts. This summary will be used for a search index. Element: {element}"
+        # Define batch size
+        BATCH_SIZE = 10
+        
+        # --- Process Texts in Batches ---
+        if len(cached_summaries["texts"]) < len(texts):
+            text_prompt = "Provide a concise, one-sentence summary of the following text that captures its main keywords and concepts. This summary will be used for a search index. Element: {element}"
+            for i in tqdm(range(len(cached_summaries["texts"]), len(texts), BATCH_SIZE), desc="Summarizing Texts"):
+                batch = texts[i:i+BATCH_SIZE]
+                summaries = [generate_summary(text_llm, t['text'], text_prompt) for t in batch]
+                cached_summaries["texts"].extend(summaries)
+                with open(summary_cache_file, "wb") as f:
+                    pickle.dump(cached_summaries, f)
+        
+        # --- Process Tables in Batches ---
+        if len(cached_summaries["tables"]) < len(tables):
+            table_prompt = "Provide a concise, one-sentence summary of the following table content that captures its main keywords and concepts. This summary will be used for a search index. Element: {element}"
+            for i in tqdm(range(len(cached_summaries["tables"]), len(tables), BATCH_SIZE), desc="Summarizing Tables"):
+                batch = tables[i:i+BATCH_SIZE]
+                summaries = [generate_summary(text_llm, t['html'], table_prompt) for t in batch]
+                cached_summaries["tables"].extend(summaries)
+                with open(summary_cache_file, "wb") as f:
+                    pickle.dump(cached_summaries, f)
+        
+        # --- Process Images in Batches ---
+        valid_image_paths = [p for p in image_paths if image_to_base64(p) is not None]
+        if len(cached_summaries["images"]) < len(valid_image_paths):
+            for i in tqdm(range(len(cached_summaries["images"]), len(valid_image_paths), BATCH_SIZE), desc="Summarizing Images"):
+                batch_paths = valid_image_paths[i:i+BATCH_SIZE]
+                batch_b64 = [image_to_base64(p) for p in batch_paths]
+                summaries = [generate_image_summary(image_llm, b64) for b64 in batch_b64]
+                cached_summaries["images"].extend(summaries)
+                with open(summary_cache_file, "wb") as f:
+                    pickle.dump(cached_summaries, f)
 
-        # The generate_summary calls are the same, but they now use these better prompts.
-        text_summaries = [generate_summary(text_llm, t['text'], text_prompt) for t in tqdm(texts, desc="Summarizing Texts")]
-        table_summaries = [generate_summary(text_llm, t['html'], table_prompt) for t in tqdm(tables, desc="Summarizing Tables")]
-        # The image summarization function also has an improved, generalized prompt inside it.
-        image_base64s = [image_to_base64(p) for p in image_paths if image_to_base64(p) is not None]
-        valid_image_paths = [p for p in image_paths if image_to_base64(p) is not None] # Filter out any broken images
-        image_summaries = [generate_image_summary(image_llm, b64) for b64 in tqdm(image_base64s, desc="Summarizing Images")]
-
-        # Generate unique IDs that will act as the link between summaries and their original data.
+        text_summaries = cached_summaries["texts"]
+        table_summaries = cached_summaries["tables"]
+        image_summaries = cached_summaries["images"]
+        
+        # The rest of the population logic is the same...
         text_ids = [str(uuid.uuid4()) for _ in texts]
         table_ids = [str(uuid.uuid4()) for _ in tables]
         image_ids = [str(uuid.uuid4()) for _ in valid_image_paths]
-
-        # *** THE KEY TO DISPLAYING IMAGES LATER ***
-        # We store the ORIGINAL, full-sized documents in the simple InMemoryStore (the docstore).
-        # For images, we now store the FILE PATH, not the base64 string. The file path is what a
-        # frontend application like Streamlit would need to display the image.
+        
         original_texts = [Document(page_content=t['text'], metadata={'source_page': t['source_page']}) for t in texts]
         retriever.docstore.mset(list(zip(text_ids, original_texts)))
         
         original_tables = [Document(page_content=t['html'], metadata={'source_page': t['source_page']}) for t in tables]
         retriever.docstore.mset(list(zip(table_ids, original_tables)))
         
-        # Here, we store the file path as the content and add a metadata flag to easily identify image documents later.
         original_images = [Document(page_content=p, metadata={'is_image': True}) for p in valid_image_paths]
         retriever.docstore.mset(list(zip(image_ids, original_images)))
 
-        # Now, we create LangChain Documents for the SUMMARIES. Critically, we add the
-        # metadata linking each summary to the unique ID of its corresponding original document.
         summary_docs = []
         for i, summary in enumerate(text_summaries):
             summary_docs.append(Document(page_content=summary, metadata={id_key: text_ids[i]}))
@@ -203,10 +228,7 @@ def main():
         for i, summary in enumerate(image_summaries):
             summary_docs.append(Document(page_content=summary, metadata={id_key: image_ids[i]}))
         
-        # Finally, add the summary documents to the ChromaDB vector store.
-        # This is the step where the summaries are converted to vectors and indexed for fast searching.
         retriever.vectorstore.add_documents(summary_docs)
-        # This command explicitly tells ChromaDB to save its in-memory index to disk, ensuring persistence.
         vectorstore.persist()
         print("✅ Retriever populated and vector store persisted.")
     else:
