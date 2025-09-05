@@ -73,7 +73,7 @@ def generate_image_summary(llm, image_base64):
         [
             HumanMessage(
                 content=[
-                    {"type": "text", "text": "Summarize this image. What is its content and what information does it convey in the context of a computer science textbook?"},
+                    {"type": "text", "text": "Provide a concise, one-sentence summary of this image's content. This summary will be used as a searchable index."},
                     {"type": "image_url", "image_url": f"data:image/jpeg;base64,{image_base64}"}
                 ]
             )
@@ -156,15 +156,20 @@ def main():
     # If it does, we can skip this entire slow summarization and embedding process.
     if not vectorstore.get()['ids']:
         print("Vector store is empty. Populating with summaries and linking to original data...")
+        # In the NEW main() function...
         print("Generating summaries for text, tables, and images. This may take a while...")
-        
-        # Define the prompts we'll use for summarization.
-        text_prompt = "Provide a very concise, one-sentence summary of the following text from a computer science textbook: {element}"
-        table_prompt = "Provide a very concise, one-sentence summary of the following table from a computer science textbook: {element}"
-        
-        # This is the slowest part of the first run. We call our helper functions to generate a summary for every single element.
+
+        # --- IMPROVED AND GENERALIZED PROMPTS ---
+        # The prompts are now purpose-driven, not subject-driven.
+        # We are telling the LLM *why* we need the summary: for a search index.
+        # This guides it to focus on keywords, key concepts, and factual content.
+        text_prompt = "Provide a concise, one-sentence summary of the following text that captures its main keywords and concepts. This summary will be used for a search index. Element: {element}"
+        table_prompt = "Provide a concise, one-sentence summary of the following table content that captures its main keywords and concepts. This summary will be used for a search index. Element: {element}"
+
+        # The generate_summary calls are the same, but they now use these better prompts.
         text_summaries = [generate_summary(text_llm, t['text'], text_prompt) for t in tqdm(texts, desc="Summarizing Texts")]
         table_summaries = [generate_summary(text_llm, t['html'], table_prompt) for t in tqdm(tables, desc="Summarizing Tables")]
+        # The image summarization function also has an improved, generalized prompt inside it.
         image_base64s = [image_to_base64(p) for p in image_paths if image_to_base64(p) is not None]
         valid_image_paths = [p for p in image_paths if image_to_base64(p) is not None] # Filter out any broken images
         image_summaries = [generate_image_summary(image_llm, b64) for b64 in tqdm(image_base64s, desc="Summarizing Images")]
