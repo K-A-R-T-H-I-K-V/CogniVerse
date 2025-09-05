@@ -1,6 +1,14 @@
 # In .gitignore
-cognitext-env/
+
+# Python virtual environment
+cogniverse_env/
+
+# Python cache files
 __pycache__/
+
+# Secret environment variables
 .env
-vector_store_text/
-images/
+
+# Generated data and vector stores
+figures/
+processed_data/
