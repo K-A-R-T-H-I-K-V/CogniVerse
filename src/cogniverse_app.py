@@ -16,9 +16,7 @@ from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
-# Add this with the other LangChain imports
-from langchain_core.runnables import RunnableBranch
+from langchain_core.runnables import RunnablePassthrough, RunnableBranch
 
 # --- Specific LangChain Component Imports ---
 from langchain.storage import InMemoryStore
@@ -40,7 +38,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 PROCESSED_DATA_DIR = PROJECT_ROOT / "processed_data"
 VECTOR_STORE_PATH = PROJECT_ROOT / "vector_store_chroma"
 
-# We use the Gemini API for the one-time, heavy-lifting summary generation for images.
+# We use the Gemini API for the one-time, heavy-lifting summary generation 
 SUMMARY_MODEL_API = "gemini-1.5-flash"
 # We use local models for the fast, interactive parts of the application.
 FINAL_RESPONSE_MODEL_LOCAL = "llava"
@@ -99,7 +97,50 @@ def parse_llm_summaries(llm_output: str, expected_count: int) -> list[str]:
         
     return final_summaries
 
-# In src/cogniverse_app.py, REPLACE the old function with this FINAL version.
+
+def generate_text_summaries_in_batch(llm, text_batch: list[str]) -> list[str]:
+    """
+    Generates summaries for a batch of text chunks in a single, efficient API call.
+    """
+    if not text_batch:
+        return []
+
+    # Create a single prompt with all the chunks numbered.
+    prompt_text = f"""
+<instructions>
+You are an expert at summarizing academic text for a search index. You will be given a batch of {len(text_batch)} text chunks from a textbook.
+Your task is to provide a concise, one-sentence summary for EACH text chunk.
+- You MUST number your summaries starting from 1.
+- The summary on line N MUST correspond to CHUNK N.
+- The summary MUST capture the main keywords, definitions, and concepts in the chunk.
+- Do NOT add any extra text, conversation, or apologies.
+- If a chunk is nonsensical or too short to summarize, output the number and the exact text: [SUMMARY_GENERATION_FAILED]
+</instructions>
+
+<example>
+--- CHUNK 1 ---
+4.1.1 Public, Private, and Hybrid Clouds. The concept of cloud computing has evolved from cluster, grid, and utility computing. Cluster and grid computing leverage the use of many computers in parallel to solve problems of any size.
+--- CHUNK 2 ---
+A public cloud is owned by the public and accessible by any user who has paid for the service. Public clouds are owned by service providers like Amazon, Google, and Microsoft.
+Your output MUST be in this exact format:
+1. An introduction to cloud computing, its evolution from cluster and grid computing, and the three main types: public, private, and hybrid.
+2. A definition of a public cloud as a service owned by providers like Amazon, Google, and Microsoft, accessible on a pay-per-use basis.
+</example>
+
+Here are the {len(text_batch)} text chunks:
+"""
+    
+    for i, text in enumerate(text_batch):
+        prompt_text += f"--- CHUNK {i+1} ---\n{text}\n\n"
+
+    try:
+        msg = llm.invoke(prompt_text)
+        # Use our robust parser to handle the numbered list output
+        summaries = parse_llm_summaries(msg.content, len(text_batch))
+        return summaries
+    except Exception as e:
+        print(f"\nAn error occurred during batch text summarization: {e}")
+        return ["[SUMMARY_API_ERROR]"] * len(text_batch)
 
 def generate_image_summaries_in_batch(llm, image_batch_b64):
     """
@@ -152,11 +193,6 @@ Here are the {len(image_batch_b64)} images:
     except Exception as e:
         print(f"\nAn API error occurred during batch image summarization: {e}")
         return ["[SUMMARY_API_ERROR]"] * len(image_batch_b64)
-        
-    except Exception as e:
-        print(f"\nAn error occurred during batch image summarization: {e}")
-        # If the entire API call fails, return a list of placeholders of the correct length.
-        return ["Image summary generation failed due to API error."] * len(image_batch_b64)
 
 def format_docs_for_display(docs, image_paths):
     """A utility function to pretty-print the retrieved sources for the user."""
@@ -200,7 +236,7 @@ def main():
     # --- Step C: Setup the Multi-Vector Retriever ---
     print("Setting up the Multi-Vector Retriever...")
     vectorstore = Chroma(
-        collection_name="cogniverse_final_architecture_v6", # New collection name for a clean build
+        collection_name="cogniverse-final-v7", # New collection name for a clean build
         # embedding_function=HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2"),
         embedding_function=HuggingFaceEmbeddings(model_name="BAAI/bge-large-en-v1.5"),
         persist_directory=str(VECTOR_STORE_PATH)
@@ -218,46 +254,67 @@ def main():
     if not vectorstore.get()['ids']:
         print("Vector store is empty. Populating with fast hybrid strategy...")
         
-        # --- Text and Table Processing (Instant) ---
-        all_docs = [Document(page_content=t['text'], metadata={'source_page': t['source_page']}) for t in texts]
-        all_docs.extend([Document(page_content=t['html'], metadata={'source_page': t['source_page']}) for t in tables])
-        doc_ids = [str(uuid.uuid4()) for _ in all_docs]
-        retriever.docstore.mset(list(zip(doc_ids, all_docs)))
+        # # --- Text and Table Processing (Instant) ---
+        # all_docs = [Document(page_content=t['text'], metadata={'source_page': t['source_page']}) for t in texts]
+        # all_docs.extend([Document(page_content=t['html'], metadata={'source_page': t['source_page']}) for t in tables])
+        # doc_ids = [str(uuid.uuid4()) for _ in all_docs]
+        # retriever.docstore.mset(list(zip(doc_ids, all_docs)))
 
-        sub_chunk_docs = []
-        for i, doc in enumerate(tqdm(all_docs, desc="Creating Text Sub-Chunks")):
-            # sub_chunk_docs.append(Document(page_content=doc.page_content[:1024], metadata={id_key: doc_ids[i]}))
-            sub_chunk_docs.append(Document(page_content=doc.page_content, metadata={id_key: doc_ids[i]}))
+        # sub_chunk_docs = []
+        # for i, doc in enumerate(tqdm(all_docs, desc="Creating Text Sub-Chunks")):
+        #     # sub_chunk_docs.append(Document(page_content=doc.page_content[:1024], metadata={id_key: doc_ids[i]}))
+        #     sub_chunk_docs.append(Document(page_content=doc.page_content, metadata={id_key: doc_ids[i]}))
         
-        BATCH_SIZE = 4000
-        for i in tqdm(range(0, len(sub_chunk_docs), BATCH_SIZE), desc="Adding Text Sub-Chunks to ChromaDB"):
-            retriever.vectorstore.add_documents(sub_chunk_docs[i:i+BATCH_SIZE])
-        
-        # --- Image Processing (Fast, via Gemini API Batching) ---
-        print("Now, generating summaries for images using the Gemini API. This should take a few minutes.")
-        
-        valid_image_paths = [p for p in image_paths if image_to_base64(p) is not None]
-        image_base64s = [image_to_base64(p) for p in valid_image_paths]
-        
-        IMAGE_BATCH_SIZE = 10 # Your brilliant insight
-        image_summaries = []
-        for i in tqdm(range(0, len(image_base64s), IMAGE_BATCH_SIZE), desc="Summarizing Images with Gemini (Batch)"):
-            batch_b64 = image_base64s[i:i+IMAGE_BATCH_SIZE]
-            image_summaries.extend(generate_image_summaries_in_batch(summary_llm_api, batch_b64))
+        # BATCH_SIZE = 4000
+        # for i in tqdm(range(0, len(sub_chunk_docs), BATCH_SIZE), desc="Adding Text Sub-Chunks to ChromaDB"):
+        #     retriever.vectorstore.add_documents(sub_chunk_docs[i:i+BATCH_SIZE])
+        # In the main() function, inside the if not vectorstore.get()['ids']: block...
 
-            time.sleep(5) 
-        
-        image_ids = [str(uuid.uuid4()) for _ in valid_image_paths]
+# REPLACE the old "Text and Table Processing" section with this:
+
+        # --- Text and Table Processing (Now with Gemini Summaries) ---
+        # --- Prepare all documents for the docstore ---
+        all_text_docs = [Document(page_content=t['text'], metadata={'source_page': t['source_page']}) for t in texts]
+        all_text_docs.extend([Document(page_content=t['html'], metadata={'source_page': t['source_page']}) for t in tables])
+        text_doc_ids = [str(uuid.uuid4()) for _ in all_text_docs]
+        retriever.docstore.mset(list(zip(text_doc_ids, all_text_docs)))
+
+        valid_image_paths = [p for p in image_paths if os.path.exists(p)]
         image_docs = [Document(page_content=p, metadata={'is_image': True}) for p in valid_image_paths]
+        image_ids = [str(uuid.uuid4()) for _ in image_docs]
         retriever.docstore.mset(list(zip(image_ids, image_docs)))
         
-        summary_docs = [Document(page_content=summary, metadata={id_key: image_ids[i]}) for i, summary in enumerate(image_summaries)]
-        retriever.vectorstore.add_documents(summary_docs)
+        # --- Generate summaries for all docs ---
+        print("Generating text summaries via API...")
+        TEXT_BATCH_SIZE = 50
+        text_contents = [doc.page_content for doc in all_text_docs]
+        text_summaries = []
+        for i in tqdm(range(0, len(text_contents), TEXT_BATCH_SIZE), desc="Summarizing Text Chunks (Batch)"):
+            batch_text = text_contents[i:i+TEXT_BATCH_SIZE]
+            text_summaries.extend(generate_text_summaries_in_batch(summary_llm_api, batch_text))
+            time.sleep(2)
+
+        print("Generating image summaries via API...")
+        # OPTIMIZATION: Increased batch size to reduce API calls
+        IMAGE_BATCH_SIZE = 15
+        image_base64s = [image_to_base64(p) for p in valid_image_paths]
+        image_summaries = []
+        for i in tqdm(range(0, len(image_base64s), IMAGE_BATCH_SIZE), desc="Summarizing Images (Batch)"):
+            batch_b64 = image_base64s[i:i+IMAGE_BATCH_SIZE]
+            image_summaries.extend(generate_image_summaries_in_batch(summary_llm_api, batch_b64))
+            time.sleep(2)
+
+        # --- Add all summaries to the vector store ---
+        text_summary_docs = [Document(page_content=s, metadata={id_key: text_doc_ids[i]}) for i, s in enumerate(text_summaries)]
+        image_summary_docs = [Document(page_content=s, metadata={id_key: image_ids[i]}) for i, s in enumerate(image_summaries)]
+        all_summary_docs = text_summary_docs + image_summary_docs
         
-        # REPLACE IT WITH THIS LINE:
+        BATCH_SIZE = 4000
+        for i in tqdm(range(0, len(all_summary_docs), BATCH_SIZE), desc="Adding All Summaries to ChromaDB"):
+            retriever.vectorstore.add_documents(all_summary_docs[i:i+BATCH_SIZE])
+        
         del vectorstore
         print("✅ Vector store populated and saved to disk.")
-        print("✅ Retriever fully populated and vector store persisted.")
     else:
         print("✅ Vector store already populated. Loading from disk.")
 
@@ -275,9 +332,7 @@ def main():
 
     # --- Step F: Define the Final Conversational RAG Chain ---
     condense_question_prompt = ChatPromptTemplate.from_template("""Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question, in its original language.
-
-Chat History:
-{chat_history}
+Chat History: {chat_history}
 Follow Up Input: {question}
 Standalone question:""")
     
@@ -290,8 +345,7 @@ Standalone question:""")
             return input["question"]
 
     def format_for_final_prompt(docs):
-        prompt_content = []
-        prompt_content.append({"type": "text", "text": """You are an expert university study buddy. Your primary directive is to act as a tutor and give a justifiable, well-written, and easy-to-read answer based STRICTLY AND ONLY on the provided context, which may include text, tables, and images.
+        prompt_content = prompt_content = [{"type": "text", "text": """You are an expert university study buddy. Your primary directive is to act as a tutor and give a justifiable, well-written, and easy-to-read answer based STRICTLY AND ONLY on the provided context, which may include text, tables, and images.
 
 **Instructions:**
 1.  **Synthesize, Do Not Just List:** Read all the provided context documents. Weave the information into a **single, cohesive, flowing answer.** Do not list information from different documents separately. Your answer should read like a single, well-written explanation from an expert tutor.
@@ -299,7 +353,7 @@ Standalone question:""")
 3.  **Format for Readability:** Use Markdown for formatting. Use headings and subheadings. **Bold** key terms and definitions. Use bullet points for lists.
 4.  **Strictly Adhere to Context:** If the context does not contain enough information to answer the question, you MUST respond with exactly this phrase: "Based on the provided textbook, I cannot answer this question." and not a word more. Do not use any outside knowledge.
 
---- CONTEXT START ---"""})
+--- CONTEXT START ---"""}]
 
         for doc in docs:
             if doc.metadata.get('is_image', False):
@@ -313,10 +367,6 @@ Standalone question:""")
         prompt_content.append({"type": "text", "text": "\n--- CONTEXT END ---\n"})
         return prompt_content
     
-    # In src/cogniverse_app.py, REPLACE the entire chain block with this one
-
-    # In src/cogniverse_app.py, REPLACE the entire chain block with this one
-
     # This helper function will format our final output
     def format_final_output(input_dict):
         return {
@@ -328,12 +378,8 @@ Standalone question:""")
     # The main logic for handling a query when context IS found
     rag_chain_with_llm = (
         RunnablePassthrough.assign(context=lambda x: format_for_final_prompt(x["final_docs"]))
-        .assign(
-            final_prompt_content=lambda x: x["context"] + [{"type": "text", "text": f"\n\nQuestion: {x['question']}"}]
-        )
-        | ChatPromptTemplate.from_messages([
-            ("human", "{final_prompt_content}")
-        ])
+        .assign(final_prompt_content=lambda x: x["context"] + [{"type": "text", "text": f"\n\nQuestion: {x['standalone_question']}"}])
+        | ChatPromptTemplate.from_messages([("human", "{final_prompt_content}")])
         | final_rag_llm_local
         | StrOutputParser()
     )
@@ -357,6 +403,7 @@ Standalone question:""")
             ),
             "image_docs": lambda x: x["split_docs"]["image_docs"],
             "question": itemgetter("question"),
+            "standalone_question": itemgetter("standalone_question"),
         }
         | RunnablePassthrough.assign(final_docs=lambda x: x["reranked_docs"] + x["image_docs"])
         | RunnablePassthrough.assign(answer=gate) # Pass the results to the gate
@@ -376,9 +423,9 @@ Standalone question:""")
             
             result = chain.invoke({"question": user_query, "chat_history": chat_history})
             
-            print("--- DEBUG: RAW CHAIN OUTPUT ---")
-            print(result)
-            print("-----------------------------")
+            # print("--- DEBUG: RAW CHAIN OUTPUT ---")
+            # print(result)
+            # print("-----------------------------")
 
             chat_history.extend([
                 HumanMessage(content=user_query),

@@ -1,10 +1,10 @@
-# In src/data_processor.py (FINAL Unstructured + MarkdownSplitter VERSION)
+# In src/data_processor.py (FINAL VERSION with all fixes)
 
 import pickle
 import re
 from pathlib import Path
 from tqdm import tqdm
-import fitz  # PyMuPDF is still the most reliable for images
+import fitz  # PyMuPDF for reliable page text and images
 from unstructured.partition.pdf import partition_pdf
 from langchain.text_splitter import MarkdownHeaderTextSplitter
 
@@ -15,34 +15,46 @@ OUTPUT_DIR = PROJECT_ROOT / "processed_data"
 
 # --- 2. NEW HYBRID PROCESSING LOGIC ---
 
-def elements_to_markdown(raw_pdf_elements: list) -> str:
+def elements_to_markdown(raw_pdf_elements: list) -> tuple[str, list]:
     """
-    Converts a list of Unstructured elements into a single Markdown string.
-    This is the core of your brilliant idea.
+    Converts a list of Unstructured elements into a single Markdown string
+    and separates out the tables.
     """
-    print("Converting Unstructured elements to Markdown...")
+    print("Converting Unstructured elements to Markdown and separating tables...")
     markdown_text = ""
+    tables = []
+    
     for element in tqdm(raw_pdf_elements, desc="Converting elements"):
-        category = element.metadata.category
+        category = element.category
         text = element.text
         
-        if category == "Title":
-            # Use '#' for main titles/headings
-            markdown_text += f"# {text}\n\n"
+        if category == "Table":
+            # Handle tables separately, extracting HTML if available
+            table_html = element.metadata.text_as_html
+            if table_html:
+                tables.append({
+                    "html": table_html,
+                    "text": text,
+                    "source_page": element.metadata.page_number
+                })
+            continue # Don't add table text to the main markdown content
+            
+        elif category == "Title":
+            # FIX 1: Use regex to detect structure and apply correct heading level
+            if re.match(r'^\d+\.\d+\.\d+', text): # e.g., 3.1.1
+                markdown_text += f"### {text}\n\n"
+            elif re.match(r'^\d+\.\d+', text): # e.g., 3.1 or 4.1
+                markdown_text += f"## {text}\n\n"
+            else: # Main chapter titles
+                markdown_text += f"# {text}\n\n"
         elif category == "ListItem":
-            # Use '*' for list items, ensuring clean formatting
-            # This regex removes any stray bullets unstructured might have added
             clean_text = re.sub(r'^(?:[\s*•-]+)\s*', '', text)
             markdown_text += f"* {clean_text}\n"
-        elif category == "NarrativeText":
-            # Regular text paragraphs
-            markdown_text += f"{text}\n\n"
-        else:
-            # Catch-all for other element types
+        else: # NarrativeText and others
             markdown_text += f"{text}\n\n"
             
-    print("✅ Element to Markdown conversion complete.")
-    return markdown_text
+    print("✅ Element processing complete.")
+    return markdown_text, tables
 
 def chunk_markdown_with_page_info(markdown_text: str, doc_pages: list) -> list[dict]:
     """
@@ -51,6 +63,8 @@ def chunk_markdown_with_page_info(markdown_text: str, doc_pages: list) -> list[d
     print("Chunking Markdown and associating page numbers...")
     headers_to_split_on = [
         ("#", "Header 1"),
+        ("##", "Header 2"),
+        ("###", "Header 3"),
     ]
     markdown_splitter = MarkdownHeaderTextSplitter(
         headers_to_split_on=headers_to_split_on, strip_headers=False
@@ -58,18 +72,19 @@ def chunk_markdown_with_page_info(markdown_text: str, doc_pages: list) -> list[d
     
     md_chunks = markdown_splitter.split_text(markdown_text)
     
-    # Associate chunks with the page number of their first line.
-    # This is a robust way to handle page numbers.
     final_chunks = []
     for chunk in tqdm(md_chunks, desc="Associating page numbers"):
         first_line = chunk.page_content.split('\n', 1)[0]
-        found_page = "N/A"
         
-        # Search through the original page texts to find the page number
-        for page_num, page_text in doc_pages:
-            if first_line in page_text:
-                found_page = page_num
-                break
+        # FIX 2: Clean the markdown from the first line before comparing
+        cleaned_first_line = re.sub(r'^[#*\s]+', '', first_line).strip()
+        
+        found_page = "N/A"
+        if cleaned_first_line: # Ensure we don't search for empty strings
+            for page_num, page_text in doc_pages:
+                if cleaned_first_line in page_text:
+                    found_page = page_num
+                    break
         
         final_chunks.append({
             "text": chunk.page_content,
@@ -81,7 +96,7 @@ def chunk_markdown_with_page_info(markdown_text: str, doc_pages: list) -> list[d
 
 def extract_images(pdf_path, output_dir):
     """Extracts images using PyMuPDF (most reliable method)."""
-    # This function remains the same as the previous version.
+    # This function remains the same.
     print("Extracting images...")
     image_output_dir = output_dir / "images"
     image_output_dir.mkdir(parents=True, exist_ok=True)
@@ -104,7 +119,7 @@ def extract_images(pdf_path, output_dir):
 
 # --- 3. MAIN EXECUTION BLOCK ---
 def main():
-    print("--- Starting Data Processing (Unstructured + Markdown Hybrid Method) ---")
+    print("--- Starting Data Processing (FINAL HYBRID Method) ---")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # 1. Partition PDF into elements using Unstructured
@@ -114,10 +129,13 @@ def main():
         infer_table_structure=True,
     )
 
-    # 2. Convert elements to a single Markdown string
-    markdown_content = elements_to_markdown(raw_pdf_elements)
-    
-    # 3. For accurate page number association, we'll get raw page text from PyMuPDF
+    # 2. Convert elements to Markdown and extract tables
+    markdown_content, tables = elements_to_markdown(raw_pdf_elements)
+    # FIX 3: Save the extracted tables
+    with open(OUTPUT_DIR / "tables.pkl", "wb") as f:
+        pickle.dump(tables, f)
+
+    # 3. Get raw page text from PyMuPDF for accurate page number association
     doc = fitz.open(PDF_FILE_PATH)
     doc_pages = [(i + 1, page.get_text("text")) for i, page in enumerate(doc)]
     doc.close()
@@ -127,18 +145,12 @@ def main():
     with open(OUTPUT_DIR / "texts.pkl", "wb") as f:
         pickle.dump(text_chunks, f)
 
-    # 5. Extract images using the reliable PyMuPDF method
+    # 5. Extract images
     image_paths = extract_images(PDF_FILE_PATH, OUTPUT_DIR)
     with open(OUTPUT_DIR / "image_paths.pkl", "wb") as f:
         pickle.dump(image_paths, f)
 
-    # 6. Create empty tables.pkl for compatibility
-    with open(OUTPUT_DIR / "tables.pkl", "wb") as f:
-        pickle.dump([], f)
-
-    print("\n✅ Hybrid data processing complete!")
-    print(f"Processed data saved in: {OUTPUT_DIR}")
+    print(f"\n✅ All processing complete! Found {len(tables)} tables.")
 
 if __name__ == "__main__":
     main()
-
