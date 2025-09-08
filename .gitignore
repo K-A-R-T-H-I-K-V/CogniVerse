@@ -15,3 +15,5 @@ processed_data/
 vector_store_chroma/
 
 snippets.txt
+
+data/
