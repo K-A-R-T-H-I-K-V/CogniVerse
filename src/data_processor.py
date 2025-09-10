@@ -12,7 +12,7 @@ import uuid
 
 # --- 1. CONFIGURATION ---
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PDF_FILE_PATH = PROJECT_ROOT / "data" / "mod4.pdf" # Make sure this is your new file
+PDF_FILE_PATH = PROJECT_ROOT / "data" / "cleaned_BCS502_CN_Mod1.pdf" # Make sure this is your new file
 OUTPUT_DIR = PROJECT_ROOT / "processed_data"
 
 # --- 2. HYBRID PROCESSING LOGIC ---
