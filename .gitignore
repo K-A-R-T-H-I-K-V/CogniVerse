@@ -17,3 +17,5 @@ vector_store_chroma/
 snippets.txt
 
 data/
+
+frontend/node_modules
