@@ -13,6 +13,7 @@ __pycache__/
 figures/
 processed_data/
 vector_store_chroma/
+doc_store
 
 snippets.txt
 
