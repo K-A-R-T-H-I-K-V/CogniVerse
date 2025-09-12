@@ -43,6 +43,8 @@ DOC_STORE_PATH = PROJECT_ROOT / "doc_store"
 FINAL_RESPONSE_MODEL_LOCAL = "llava"
 QUESTION_CONDENSING_MODEL_LOCAL = "phi3:mini"
 SUMMARY_MODEL_API = "gemini-1.5-flash"
+summary_llm_api = ChatGoogleGenerativeAI(model=SUMMARY_MODEL_API, google_api_key=GOOGLE_API_KEY, temperature=0)
+final_rag_llm_api = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=GOOGLE_API_KEY, temperature=0.1) # Or "gemini-1.5-pro" for max quality
 
 # --- 2. HELPER FUNCTIONS ---
 def parse_llm_summaries(llm_output: str, expected_count: int) -> list[str]:
@@ -129,26 +131,140 @@ def image_to_base64(image_path):
         with open(image_path, "rb") as img_file: return base64.b64encode(img_file.read()).decode('utf-8')
     except Exception: return None
 
-def format_for_final_prompt(docs):
-    # FIX #1: THE FORTIFIED PROMPT
-    # We've made this prompt even stricter to force the LLM to obey.
-    prompt_content = [{"type": "text", "text": """You are an expert university study buddy. Your primary directive is to act as a tutor and give a justifiable, well-written, and easy-to-read answer based STRICTLY AND ONLY on the provided context, which may include text, tables, and images.
+# In src/backend.py
 
-**Instructions:**
-1.  **Analyze and Synthesize:** Carefully read all the provided context documents. Weave the information into a single, cohesive, flowing answer. Do not just list information from different documents separately.
-2.  **Analyze Images/Tables:** If images or tables are present, do not just mention them. **Analyze their content** and explain what they illustrate in relation to the user's question.
-3.  **Strictly Adhere to Context:** You are forbidden from using any external knowledge. If the provided context does not contain enough information to answer the question, you MUST respond with exactly this phrase: "Based on the provided textbook, I cannot answer this question." and not a word more.
-4.  **Acknowledge Your Source:** You MUST begin your answer by stating where the information comes from. For example, start with "According to the textbook..." or "Based on the provided material...".
+# def format_for_final_prompt(docs):
+#     prompt_content = [{
+#         "type": "text",
+#         "text": """You are a world-class university study buddy AI. Your sole purpose is to answer a student's question based *exclusively* on the textbook excerpts provided to you.
 
---- CONTEXT START ---"""}]
+# **--- PRIMARY DIRECTIVE ---**
+# - You are strictly forbidden from using any external knowledge.
+# - Your entire answer MUST be derived from the provided CONTEXT.
+# - If the CONTEXT does not contain enough information to answer the question, you MUST reply with the single, exact phrase: "Based on the provided textbook, I cannot answer this question."
+# - Do not apologize or add any conversational filler.
+# - If images or tables are provided, analyze them and integrate their information into your answer. Refer to an image as "the provided diagram" or "the figure illustrates...".
+# - If you discuss a diagram, insert the placeholder `[DIAGRAM]` exactly where the image should appear in your explanation.
+
+# --- START OF CONTEXT ---"""
+#     }]
+
+#     has_image = False
+#     for doc in docs:
+#         if doc.metadata.get('is_image', False):
+#             has_image = True
+#             b64_image = image_to_base64(doc.page_content)
+#             if b64_image:
+#                 prompt_content.append({"type": "image_url", "image_url": f"data:image/jpeg;base64,{b64_image}"})
+#         else:
+#             source_page = doc.metadata.get('source_page', 'N/A')
+#             prompt_content.append({"type": "text", "text": f"\n\n[Text from Page {source_page}]:\n{doc.page_content}"})
+
+#     # This is the new, crucial part. The task is defined AFTER all context.
+#     final_instruction = """--- END OF CONTEXT ---
+
+# **Final Task:** Based ONLY on the context provided above, synthesize a comprehensive and clear answer to the following question. Start your answer with "According to the textbook...".
+# """
+#     prompt_content.append({"type": "text", "text": final_instruction})
+    
+#     return prompt_content
+
+
+# def format_for_final_prompt(docs):
+#     # 1. Build the context string from text documents
+#     context_str = ""
+#     for doc in docs:
+#         if not doc.metadata.get('is_image', False):
+#             source_page = doc.metadata.get('source_page', 'N/A')
+#             context_str += f"\n\n<source page=\"{source_page}\">\n{doc.page_content}\n</source>"
+
+#     # 2. Find the first image for the multimodal part of the prompt
+#     b64_image = None
+#     first_image_doc = next((doc for doc in docs if doc.metadata.get('is_image')), None)
+#     if first_image_doc:
+#         b64_image = image_to_base64(first_image_doc.page_content)
+
+#     # 3. Construct the final "Expert Educator" prompt
+#     prompt_text = f"""<role>
+# You are an Expert Educator AI. Your purpose is to create clear, structured, and easy-to-understand study notes for a university student based *strictly* on their textbook material.
+# </role>
+
+# <rules>
+# 1.  Your entire response MUST be derived from the provided <context>, which includes both text and images. The image is a valid and critical source of information.
+# 2.  **Formatting is crucial.** You MUST use Markdown for clear formatting. Use numbered or bulleted lists for components, steps, or key features. Use bold text for key terms.
+# 3.  **Preserve Key Terminology.** When listing components, state the main term exactly as it appears in the textbook.
+# 4.  **Explain Simply.** Immediately after stating the key term, provide a "Simple Explanation" in your own words to clarify the concept for the student.
+# 5.  **Analyze Images.** If an image is provided, you MUST analyze it. Seamlessly integrate its description into the relevant part of your explanation and mark its location with the `[DIAGRAM]` placeholder.
+# 6.  If the context is insufficient, reply ONLY with: "Based on the provided textbook, I cannot answer this question."
+# </rules>
+
+# <example_format>
+# Here is an example of the desired output format:
+# According to the textbook, the main components are:
+
+# 1.  **Message:**
+#     * **Simple Explanation:** This is the actual information being sent, like an email, a picture, or a video.
+# 2.  **Sender:**
+#     * **Simple Explanation:** This is the device or person that originates the message, such as your phone or computer.
+#     * The provided diagram illustrates the sender on the left, initiating the communication process. `[DIAGRAM]`
+# </example_format>
+
+# <context>{context_str}
+# </context>
+
+# <instructions>
+# Now, following all the rules and using the format shown in the example, create a clear and structured answer to the user's question based only on the context provided.
+# </instructions>
+
+# <question>
+# """
+
+#     prompt_content = [{"type": "text", "text": prompt_text}]
+
+#     # 4. Add the image to the prompt content if it exists
+#     if b64_image:
+#         prompt_content.insert(1, {"type": "image_url", "image_url": f"data:image/jpeg;base64,{b64_image}"})
+#         prompt_content.insert(2, {"type": "text", "text": "\nAn image is provided in the context. You must analyze it as per the rules."})
+    
+#     return prompt_content
+
+# In src/backend.py
+
+# In src/backend.py
+
+def prepare_final_prompt_content(docs):
+    """Prepares the list of text and image parts for the final prompt."""
+    context_str = ""
     for doc in docs:
-        if doc.metadata.get('is_image', False):
-            b64_image = image_to_base64(doc.page_content)
-            if b64_image: prompt_content.append({"type": "image_url", "image_url": f"data:image/jpeg;base64,{b64_image}"})
-        else:
+        if not doc.metadata.get('is_image', False):
             source_page = doc.metadata.get('source_page', 'N/A')
-            prompt_content.append({"type": "text", "text": f"\n[Text/Table from Page {source_page}]:\n{doc.page_content}"})
-    prompt_content.append({"type": "text", "text": "\n--- CONTEXT END ---\n\n**META-INSTRUCTION:** Remember, you must follow all rules above. Your entire response must be based *only* on the context provided. Begin your answer now."})
+            context_str += f"\n\n<source page=\"{source_page}\">\n{doc.page_content}\n</source>"
+
+    b64_image = None
+    first_image_doc = next((doc for doc in docs if doc.metadata.get('is_image')), None)
+    if first_image_doc:
+        b64_image = image_to_base64(first_image_doc.page_content)
+
+    prompt_text = f"""<role>
+You are an Expert Educator AI creating clear, structured study notes.
+</role>
+<rules>
+1. Base your entire response on the provided context, including text and images.
+2. Use Markdown: a numbered list for main items and bold for key terms.
+3. For each item, state the **Key Term**, then add a '•' and a simple explanation.
+4. If an image is provided, you MUST analyze it and refer to it in your explanation.
+</rules>
+<context>{context_str}</context>
+<instructions>
+Follow all rules to answer the user's question.
+</instructions>
+"""
+    
+    prompt_content = [{"type": "text", "text": prompt_text}]
+
+    if b64_image:
+        prompt_content.append({"type": "image_url", "image_url": f"data:image/jpeg;base64,{b64_image}"})
+    
     return prompt_content
 
 # --- 3. GLOBAL AI SETUP ---
@@ -243,17 +359,22 @@ Follow Up Input: {question}
 Standalone question:""")
     return (condense_question_prompt | condense_llm_local | StrOutputParser()).invoke(input)
 
+
+# In src/backend.py
+
 def format_final_output(input_dict):
+    # Get the text answer generated by the LLM
     final_answer = input_dict["text_answer"]
-    # FIX #2: APPEND THE TOP IMAGE TO THE ANSWER
-    # Check if there are any images and append the first one (most relevant).
-    if input_dict.get("top_image"):
-        image_path = input_dict["top_image"].page_content
-        b64_img = image_to_base64(image_path)
+    
+    # Find the first retrieved image document
+    top_image_doc = next((doc for doc in input_dict["final_docs"] if doc.metadata.get('is_image')), None)
+
+    # If an image was found, append its Markdown to the end of the answer
+    if top_image_doc:
+        b64_img = image_to_base64(top_image_doc.page_content)
         if b64_img:
-            # This creates a Markdown image link with embedded base64 data.
-            # This guarantees the image will render in the frontend's markdown component.
-            final_answer += f"\n\n![Relevant Diagram](data:image/jpeg;base64,{b64_img})"
+            image_markdown = f"\n\n![Relevant Diagram](data:image/jpeg;base64,{b64_img})"
+            final_answer += image_markdown
 
     return {
         "answer": final_answer,
@@ -261,11 +382,30 @@ def format_final_output(input_dict):
         "source_docs": [doc for doc in input_dict["final_docs"] if not doc.metadata.get('is_image', False)],
     }
 
+# local llm -> failed to obey
+# rag_chain_with_llm = (
+#     RunnablePassthrough.assign(context=lambda x: format_for_final_prompt(x["final_docs"]))
+#     .assign(final_prompt_content=lambda x: x["context"] + [{"type": "text", "text": f"\n\nQuestion: {x['standalone_question']}"}])
+#     | ChatPromptTemplate.from_messages([("human", "{final_prompt_content}")])
+#     | final_rag_llm_local
+#     | StrOutputParser()
+# )
+
+# In src/backend.py, replace your entire rag_chain_with_llm definition
+
 rag_chain_with_llm = (
-    RunnablePassthrough.assign(context=lambda x: format_for_final_prompt(x["final_docs"]))
-    .assign(final_prompt_content=lambda x: x["context"] + [{"type": "text", "text": f"\n\nQuestion: {x['standalone_question']}"}])
-    | ChatPromptTemplate.from_messages([("human", "{final_prompt_content}")])
-    | final_rag_llm_local
+    RunnablePassthrough.assign(
+        # Step 1: Prepare the content (text and image parts)
+        prompt_parts=lambda x: prepare_final_prompt_content(x["final_docs"])
+    )
+    | RunnablePassthrough.assign(
+        # Step 2: Construct the final HumanMessage with the user's question at the end
+        final_message=lambda x: HumanMessage(
+            content=x["prompt_parts"] + [{"type": "text", "text": f"<question>\n{x['standalone_question']}\n</question>"}]
+        )
+    )
+    # Step 3: Invoke the model with the single, correctly formatted message object
+    | (lambda x: final_rag_llm_api.invoke([x["final_message"]]))
     | StrOutputParser()
 )
 
@@ -287,11 +427,10 @@ chain = (
         "standalone_question": itemgetter("standalone_question"),
     }
     | RunnablePassthrough.assign(final_docs=lambda x: x["reranked_docs"] + x["image_docs"])
-    # FIX #2: A more complex final step to handle the top image display
+    # NEW FINAL STEPS
     | RunnablePassthrough.assign(
-        text_answer=gate, # Get the text-only answer first
-        top_image=lambda x: x["image_docs"][0] if x.get("image_docs") else None
-      )
+        text_answer=gate, # 'gate' is your existing rag_chain_with_llm branch
+    )
     | format_final_output
 )
 print("✅ Conversational RAG chain is ready.")

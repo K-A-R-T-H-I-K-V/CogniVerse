@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
 import { Brain, Book, Send, RotateCcw } from "lucide-react"
 import ReactMarkdown from "react-markdown"
+import rehypeRaw from "rehype-raw"
 
 interface Message {
   id: string
@@ -221,6 +222,7 @@ export default function CogniVerse() {
                     {message.type === "ai" ? (
                       <div className="prose prose-invert max-w-none text-white">
                         <ReactMarkdown
+                          rehypePlugins={[rehypeRaw]} 
                           components={{
                             p: ({ children }) => <p className="mb-2 text-white leading-relaxed">{children}</p>,
                             h1: ({ children }) => <h1 className="text-xl font-bold mb-3 text-accent">{children}</h1>,
