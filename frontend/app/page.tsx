@@ -9,11 +9,21 @@ import { Brain, Book, Send, RotateCcw } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import rehypeRaw from "rehype-raw"
 
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+
 interface Message {
   id: string
   type: "user" | "ai"
   content: string
   timestamp: Date
+  imageUrl?: string
 }
 
 interface Source {
@@ -26,6 +36,7 @@ interface Source {
 interface ApiResponse {
   answer: string
   sources: Source[]
+  relevant_image?: string
 }
 
 export default function CogniVerse() {
@@ -122,6 +133,7 @@ export default function CogniVerse() {
         type: "ai",
         content: data.answer,
         timestamp: new Date(),
+        imageUrl: data.relevant_image,
       }
 
       setMessages((prev) => [...prev, aiMessage])
@@ -209,58 +221,54 @@ export default function CogniVerse() {
             </div>
           ) : (
             <>
-              {messages.map((message) => (
-                <div key={message.id} className={`flex ${message.type === "user" ? "justify-end" : "justify-start"}`}>
-                  <div
-                    className={`max-w-[80%] rounded-lg p-4 transition-all duration-300 font-inter ${
-                      message.type === "user"
-                        ? "text-card-foreground hover:shadow-[0_0_15px_rgba(0,191,255,0.3)] hover:scale-[1.02]"
-                        : "text-card-foreground border-l-4 border-accent hover:shadow-[0_0_15px_rgba(0,191,255,0.3)] hover:border-l-8"
-                    }`}
-                    style={{ backgroundColor: "#2D3748" }}
-                  >
-                    {message.type === "ai" ? (
-                      <div className="prose prose-invert max-w-none text-white">
-                        <ReactMarkdown
-                          rehypePlugins={[rehypeRaw]} 
-                          components={{
-                            p: ({ children }) => <p className="mb-2 text-white leading-relaxed">{children}</p>,
-                            h1: ({ children }) => <h1 className="text-xl font-bold mb-3 text-accent">{children}</h1>,
-                            h2: ({ children }) => (
-                              <h2 className="text-lg font-semibold mb-2 text-accent">{children}</h2>
-                            ),
-                            h3: ({ children }) => (
-                              <h3 className="text-base font-medium mb-2 text-accent">{children}</h3>
-                            ),
-                            ul: ({ children }) => <ul className="list-disc list-inside mb-2 text-white">{children}</ul>,
-                            ol: ({ children }) => (
-                              <ol className="list-decimal list-inside mb-2 text-white">{children}</ol>
-                            ),
-                            li: ({ children }) => <li className="mb-1 text-white">{children}</li>,
-                            code: ({ children }) => (
-                              <code className="bg-gray-700 px-1 py-0.5 rounded text-accent font-mono text-sm">
-                                {children}
-                              </code>
-                            ),
-                            pre: ({ children }) => (
-                              <pre className="bg-gray-800 p-3 rounded-lg overflow-x-auto mb-2">{children}</pre>
-                            ),
-                            blockquote: ({ children }) => (
-                              <blockquote className="border-l-4 border-accent pl-4 italic text-gray-300 mb-2">
-                                {children}
-                              </blockquote>
-                            ),
-                            strong: ({ children }) => <strong className="font-semibold text-accent">{children}</strong>,
-                            em: ({ children }) => <em className="italic text-gray-300">{children}</em>,
-                          }}
-                        >
-                          {message.content}
-                        </ReactMarkdown>
+                {messages.map((message) => (
+                <div key={message.id}>
+                  {/* --- Renders the Text Bubble (only if there is text) --- */}
+                  {message.content && (
+                    <div className={`flex w-full ${message.type === "user" ? "justify-end" : "justify-start"}`}>
+                      <div
+                        className={`max-w-[80%] rounded-lg p-4 transition-all duration-300 font-inter ${
+                          message.type === "user"
+                            ? "text-card-foreground hover:shadow-[0_0_15px_rgba(0,191,255,0.3)] hover:scale-[1.02]"
+                            : "text-card-foreground border-l-4 border-accent hover:shadow-[0_0_15px_rgba(0,191,255,0.3)] hover:border-l-8"
+                        }`}
+                        style={{ backgroundColor: "#2D3748" }}
+                      >
+                        {message.type === "ai" ? (
+                          <div className="prose prose-invert max-w-none text-white">
+                            <ReactMarkdown>{message.content}</ReactMarkdown>
+                          </div>
+                        ) : (
+                          <p>{message.content}</p>
+                        )}
                       </div>
-                    ) : (
-                      <p>{message.content}</p>
-                    )}
-                  </div>
+                    </div>
+                  )}
+
+                  {/* --- Renders the Clickable Image Bubble (only for AI messages with an image) --- */}
+                  {message.type === "ai" && message.imageUrl && (
+                    <div className="flex w-full justify-start mt-2">
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <div className="max-w-[80%] rounded-lg p-2 cursor-pointer transition-transform duration-200 hover:scale-[1.03] hover:shadow-[0_0_25px_rgba(0,191,255,0.4)]" style={{ backgroundColor: "#2D3748" }}>
+                            <img
+                              src={message.imageUrl}
+                              alt="Relevant Diagram (Click to enlarge)"
+                              className="w-full max-w-lg rounded-md object-contain"
+                            />
+                          </div>
+                        </DialogTrigger>
+                        {/* <DialogContent className="sm:max-w-[80vw] max-w-[95vw] p-0 border-none bg-transparent"> */}
+                        <DialogContent className="sm:max-w-[80vw] max-w-[95vw] bg-[#2D3748] border-accent/50">
+                          <img
+                            src={message.imageUrl}
+                            alt="Enlarged Diagram"
+                            className="w-full h-full object-contain max-h-[90vh] mx-auto"
+                          />
+                        </DialogContent>
+                      </Dialog>
+                    </div>
+                  )}
                 </div>
               ))}
               {isLoading && (
