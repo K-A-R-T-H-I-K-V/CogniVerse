@@ -50,7 +50,7 @@ CogniVerse is built on a modern RAG architecture that emphasizes data quality an
 
 ## Project Structure
 
-CogniVerse/
+```CogniVerse/
 ├── data/                  # Source data (e.g., textbook.md, manual_images/)
 ├── doc_store/             # Persistent key-value store for full documents
 ├── frontend/              # Next.js frontend application
@@ -62,6 +62,7 @@ CogniVerse/
 ├── vector_store_chroma/   # Persistent ChromaDB vector store
 ├── .env                   # Environment variables (API keys)
 └── requirements.txt       # Python dependencies
+```
 
 ## Getting Started
 
