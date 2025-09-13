@@ -1,5 +1,3 @@
-# In src/debug_retrieval.py
-
 import pickle
 from pathlib import Path
 import textwrap

@@ -20,8 +20,6 @@ VECTOR_STORE_PATH = PROJECT_ROOT / "vector_store"
 # The local LLM model you're using
 LLM_MODEL = "phi3:mini"
 
-# app.py (continued)
-
 def initialize_vector_store():
     """Checks if the vector store exists, creates it if it doesn't."""
     
@@ -50,8 +48,6 @@ def initialize_vector_store():
         print("-" * 50)
         
     return vector_store
-
-# app.py (continued)
 
 def main():
     """The main function to run the study buddy application."""

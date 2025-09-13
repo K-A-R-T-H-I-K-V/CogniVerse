@@ -1,5 +1,3 @@
-# In src/cogniverse_app.py
-
 import os
 import uuid
 import base64
@@ -8,7 +6,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 import time
 import re
-# In src/cogniverse_app.py, add this with the other imports
 from operator import itemgetter
 
 # --- Core LangChain Imports ---
@@ -45,8 +42,6 @@ FINAL_RESPONSE_MODEL_LOCAL = "llava"
 QUESTION_CONDENSING_MODEL_LOCAL = "phi3:mini"
 
 # --- 2. HELPER FUNCTIONS ---
-# In src/cogniverse_app.py, add this with the other helper functions
-
 def split_docs_by_type(docs):
     """Splits a list of documents into text/table docs and image docs."""
     text_docs, image_docs = [], []
@@ -65,8 +60,6 @@ def image_to_base64(image_path):
     except Exception as e:
         print(f"Error encoding image {image_path}: {e}")
         return None
-
-# In src/cogniverse_app.py, ADD THIS NEW HELPER FUNCTION
 
 def parse_llm_summaries(llm_output: str, expected_count: int) -> list[str]:
     """
@@ -90,7 +83,6 @@ def parse_llm_summaries(llm_output: str, expected_count: int) -> list[str]:
                 summary_map[num] = summary_text
 
     # Build the final list, ensuring 1-to-1 mapping and correct length.
-    # Your brilliant "NaN" idea is implemented here.
     final_summaries = []
     for i in range(1, expected_count + 1):
         final_summaries.append(summary_map.get(i, "[SUMMARY_GENERATION_FAILED]"))
@@ -269,8 +261,6 @@ def main():
         # for i in tqdm(range(0, len(sub_chunk_docs), BATCH_SIZE), desc="Adding Text Sub-Chunks to ChromaDB"):
         #     retriever.vectorstore.add_documents(sub_chunk_docs[i:i+BATCH_SIZE])
         # In the main() function, inside the if not vectorstore.get()['ids']: block...
-
-# REPLACE the old "Text and Table Processing" section with this:
 
         # --- Text and Table Processing (Now with Gemini Summaries) ---
         # --- Prepare all documents for the docstore ---
